@@ -1,0 +1,43 @@
+i want build diy project. i have arduino leonardo eth r3, i2c lcd (LCD1602 1602 LCD Module 16x2 Character LCD Display PCF8574T PCF8574 IIC I2C), three oneWire temperature sensors (ds18b20), cnc shield r3, two motor drivers A4988, encoder (Gnd,V, A,B connections), simple button and two endstops.
+* Device will control two stepped motors that will control pipes valve in home heater contour.
+* Each motor will have share two endstop that should be used to get minimal and maximum position. After power on device should not change motor position. instead after boot we do nothing and dont know real position. so if user will ask to rotate motor left or right by stepper on by network we need to check stoppers. i have two stoppers to let me know if i meet the left or right corner position of each motor.   endstops connected to booth motors to min and max positions. so we may use only one motor at time to relay on stepper answer.  when any motor will set in min position stepper one will fire, in amy motor will reach max position stepper two will fire.  if one motor stay in min position we will not be able to understand anything about min/max position of another motor, so after reaching min/max position we need to counter-rotate motor a little to release endstop.
+* in default state LCD should display left to right:
+  - first row: "1: temp1, 2: temp2"
+  - second row: "room: temp3      [*/+]"
+  [*/+] - means one char changing state in cycle "*" -> "+" -> "*" every second, it just show that device is work normally
+* Button and encoder will be used to navigate menu, within LCD menu user should be able to choose what motor to control and after selecting motor encoder may be used to increase or decrease motor position. While you rotate encoder motor position change sould start and you shoud be able to rotate encoder and get new updeted value of target position and / current motor position;
+* Button cycles Dashboard -> motor 1 -> motor 2 -> Dashboard.  Button should conatin debouncing 300ms;
+* Using ethernet and http device should provide status information about three temperatures in json.
+* Using ethernet and http device should allow to change motor position for each motor independently. network functionality sholud provide option to go max or go min for each motor.
+* motor driver should not be enabled if no motor action is performed
+* LCD update sholud clear trailing chars, because strings of position and temperature may have different length;
+* [not work] add simple dhcp implementation or add menu step to enter ip manually? we have small RAM to use. so better to choose smallest implementation
+* add read ip from eeprom and write ip to eeprom by http request.
+* while motor operates no need to read temperature sensors to prevent motion interruption
+* if position=0 is sent by http, motor should stop operating;
+
+PINS CONFIGURED ON BOARD:
+ONE_WIRE_BUS A0   // DS18B20 Data pin   (CNC BOARD Abort-)
+BUTTON_PIN   A1   // Menu Button   (CNC BOARD HOLD)
+ENCODER_A    A2  // (CNC BOARD ENCODER A)
+ENCODER_B    A3  // (CNC BOARD ENCODER B)
+PIN_COMMON_MIN 11 // BOOTH MOTORS MIN ENDSTOP (CNC BOARD Z- Z+)
+PIN_COMMON_MAX 9 // BOOTH MOTORS MAX ENDSTOP (CNC BOARD X- X+)
+
+M1_STEP_PIN  4  // MOTOR 1
+M1_DIR_PIN   7  // MOTOR 1
+M2_STEP_PIN  12 // MOTOR 2
+M2_DIR_PIN   13 // MOTOR 2
+EN_PIN 8 // MOTOR ENABLE PIN (HIGH is MOTOR DISABLED)
+
+#define RUN_SPEED         1000
+#define ACCEL             7000
+
+TODO:
+Use platformio, use ardiuno framework to write code, provide platformio.ini configuration.
+
+
+1. Check device compatibily for my project
+2. I will use platform.io, Give me guidence how to setup platform.io project in visual code
+3. Split into logic modules and write code
+4. Describe how to connect device wires
