@@ -47,7 +47,6 @@ This project uses the following libraries:
 
 * Ensure the driver Vref is calibrated to match motor current limits.
 * If using Pin 12, ensure no SPI conflict if adding displays/SD cards later.
-* Gears endstops currently are not implementend in 3D models.
 
 ---
 
