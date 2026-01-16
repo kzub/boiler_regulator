@@ -51,10 +51,14 @@ This project uses the following libraries:
 ---
 
 ### ⚙️ 3D Models (FreeCAD) to print CASE and mount parts included
-#### Mount parts
+#### All parts together
 
  ![Device](docs/device.png)
 
 #### Case
 
  ![Case](docs/case.png)
+
+ #### Real photo
+ ![Case](docs/example1.jpg)
+ ![Case](docs/example2.jpg)

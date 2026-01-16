@@ -30,7 +30,7 @@
 
 // --- CONSTANTS ---
 const unsigned long DEBOUNCE_DELAY = 300;
-const int ENCODER_TURN_STEP = 100; // how many motor steps per one click
+const int ENCODER_TURN_STEP = 150; // how many motor steps per one click
 const int BACKOFF_STEPS = 100;
 const long MAX_POSITION_LIMIT = 10000;
 const long SAFETY_RUN_LIMIT = 20000;
@@ -40,7 +40,7 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
-float temp1 = 0.0, temp2 = 0.0, temp3 = 0.0;
+float temp1 = 0.0, temp2 = 0.0, temp3 = 0.0, temp4 = 0.0;
 
 // MOTORS
 AccelStepper motor1(AccelStepper::DRIVER, M1_STEP_PIN, M1_DIR_PIN);
@@ -232,6 +232,8 @@ void triggerBackoff(AccelStepper &motor, int direction) {
     }
     isBackingOff = false;
 }
+const int menuResetSeconds = 30;
+int menuClearTimer = 0;
 
 void handleInput() {
     // 1. Encoder (Moves motors directly if screen is selected)
@@ -246,6 +248,7 @@ void handleInput() {
         else if (currentScreen == SCREEN_CONTROL_M2) {
             motor2.move(direction * ENCODER_TURN_STEP);
         }
+        menuClearTimer = 0;
     }
     lastEncoderA = currentA;
 
@@ -265,15 +268,19 @@ void handleInput() {
 
             lcd.clear();
         }
+        menuClearTimer = 0;
     }
 }
 
+
+
 void updateLCD() {
     // Toggle Heartbeat every 1000ms
-    if (millis() - lastHeartbeat > 1000) {
+    if (millis() - lastHeartbeat > 1000) { // if changed, look at menuResetSeconds multiplicators
         lastHeartbeat = millis();
         if (heartbeatChar == '*') heartbeatChar = '+';
         else heartbeatChar = '*';
+        menuClearTimer++;
     }
 
     static unsigned long lastLcdUpdate = 0;
@@ -281,23 +288,31 @@ void updateLCD() {
     lastLcdUpdate = millis();
 
     if (currentScreen == SCREEN_DASHBOARD) {
-        lcd.setCursor(0, 0); lcd.print(F("1: ")); lcd.print((int)temp1); lcd.print(TRAILING_CHARS);
-        lcd.setCursor(9, 0); lcd.print(F("2: ")); lcd.print((int)temp2); lcd.print(TRAILING_CHARS);
-        lcd.setCursor(0, 1); lcd.print(F("room: ")); lcd.print((int)temp3); lcd.print(TRAILING_CHARS);
+        lcd.setCursor(0, 0); lcd.print(F("F:")); lcd.print((int)temp1); lcd.print(TRAILING_CHARS);
+        lcd.setCursor(6, 0); lcd.print(F("S:")); lcd.print((int)temp2); lcd.print(TRAILING_CHARS);
+        lcd.setCursor(12, 0); lcd.print(F("B:")); lcd.print((int)temp3); lcd.print(TRAILING_CHARS);
+        lcd.setCursor(0, 1); lcd.print(F("Room:")); lcd.print((int)temp4); lcd.print(TRAILING_CHARS);
+        menuClearTimer = 0;
     }
     else if (currentScreen == SCREEN_CONTROL_M1) {
         lcd.setCursor(0, 0);
-        lcd.print(F("Floor 1"));
+        lcd.print(F("First Floor"));
         lcd.setCursor(0, 1);
         lcd.print(F("Pos: ")); lcd.print(motor1.currentPosition());
         lcd.print(TRAILING_CHARS); // clear trailing chars
+        if (menuClearTimer > menuResetSeconds) {
+            currentScreen = SCREEN_DASHBOARD;
+        }
     }
     else if (currentScreen == SCREEN_CONTROL_M2) {
         lcd.setCursor(0, 0);
-        lcd.print(F("Floor 2"));
+        lcd.print(F("Second Floor"));
         lcd.setCursor(0, 1);
         lcd.print(F("Pos: ")); lcd.print(motor2.currentPosition());
         lcd.print(TRAILING_CHARS); // clear trailing chars
+        if (menuClearTimer > menuResetSeconds) {
+            currentScreen = SCREEN_DASHBOARD;
+        }
     }
 
     // Always draw heartbeat at 15,1 (Bottom Right)
@@ -315,6 +330,7 @@ void readSensors() {
         temp1 = sensors.getTempCByIndex(0);
         temp2 = sensors.getTempCByIndex(1);
         temp3 = sensors.getTempCByIndex(2);
+        temp4 = sensors.getTempCByIndex(3);
     }
 }
 
@@ -343,7 +359,8 @@ void handleNetwork() {
                         client.print(F("{"));
                         client.print(F("\"fl1\":")); client.print(temp1); client.print(F(","));
                         client.print(F("\"fl2\":")); client.print(temp2); client.print(F(","));
-                        client.print(F("\"room\":")); client.print(temp3); client.print(F(","));
+                        client.print(F("\"boiler\":")); client.print(temp3); client.print(F(","));
+                        client.print(F("\"room\":")); client.print(temp4); client.print(F(","));
                         client.print(F("\"m1\":")); client.print(motor1.currentPosition()); client.print(F(","));
                         client.print(F("\"m2\":")); client.print(motor2.currentPosition());
                         client.print(F("}"));
