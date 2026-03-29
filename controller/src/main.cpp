@@ -30,7 +30,7 @@
 
 // --- CONSTANTS ---
 const unsigned long DEBOUNCE_DELAY = 300;
-const int ENCODER_TURN_STEP = 150; // how many motor steps per one click
+const int ENCODER_TURN_STEP = 500; // how many motor steps per one click
 const int BACKOFF_STEPS = 100;
 const long MAX_POSITION_LIMIT = 10000;
 const long SAFETY_RUN_LIMIT = 20000;
@@ -75,7 +75,7 @@ void readSensors();
 void handleInput();
 void updateLCD();
 void manageMotors();
-void triggerBackoff(AccelStepper &motor, int direction);
+void triggerBackoff(AccelStepper &motor, int direction, int pin);
 void enableMotors(bool enable);
 void loadIP(void);
 void parseAndSaveIP(char* buffer);
@@ -104,6 +104,7 @@ void setup() {
     sensors.begin();
 
     motor1.setMaxSpeed(RUN_SPEED); motor1.setAcceleration(ACCEL);
+    motor1.setPinsInverted(true, false, false); // Reverse direction for 1st floor valve
     motor2.setMaxSpeed(RUN_SPEED); motor2.setAcceleration(ACCEL);
 
     // Load IP from EEPROM
@@ -197,42 +198,47 @@ void manageMotors() {
     if (motor1.distanceToGo() != 0) {
         motor1.run();
         if (minHit && motor1.speed() < 0 && !isBackingOff) {
-            motor1.stop();
-            motor1.setCurrentPosition(0);
-            triggerBackoff(motor1, 1);
+            triggerBackoff(motor1, 1, PIN_COMMON_MIN);
+            motor1.setCurrentPosition(BACKOFF_STEPS);
         }
         else if (maxHit && motor1.speed() > 0 && !isBackingOff) {
-            motor1.stop();
-            motor1.setCurrentPosition(MAX_POSITION_LIMIT);
-            triggerBackoff(motor1, -1);
+            triggerBackoff(motor1, -1, PIN_COMMON_MAX);
+            motor1.setCurrentPosition(MAX_POSITION_LIMIT - BACKOFF_STEPS);
         }
     }
     // Motor 2 Logic
     else if (motor2.distanceToGo() != 0) {
         motor2.run();
         if (minHit && motor2.speed() < 0 && !isBackingOff) {
-            motor2.stop();
-            motor2.setCurrentPosition(0);
-            triggerBackoff(motor2, 1);
+            triggerBackoff(motor2, 1, PIN_COMMON_MIN);
+            motor2.setCurrentPosition(BACKOFF_STEPS);
         }
         else if (maxHit && motor2.speed() > 0 && !isBackingOff) {
-            motor2.stop();
-            motor2.setCurrentPosition(MAX_POSITION_LIMIT);
-            triggerBackoff(motor2, -1);
+            triggerBackoff(motor2, -1, PIN_COMMON_MAX);
+            motor2.setCurrentPosition(MAX_POSITION_LIMIT - BACKOFF_STEPS);
         }
     }
 }
 
-void triggerBackoff(AccelStepper &motor, int direction) {
+void triggerBackoff(AccelStepper &motor, int direction, int pin) {
     isBackingOff = true;
-    long target = motor.currentPosition() + (direction * BACKOFF_STEPS);
-    motor.moveTo(target);
+    
+    // Step away slowly until the pin is released
+    motor.setSpeed(direction * (RUN_SPEED / 2.0));
+    while (digitalRead(pin) == LOW) {
+        motor.runSpeed();
+    }
+    
+    // Extra backoff to clear switch properly
+    motor.setCurrentPosition(0);
+    motor.moveTo(direction * BACKOFF_STEPS);
     while (motor.distanceToGo() != 0) {
         motor.run();
     }
+    
     isBackingOff = false;
 }
-const int menuResetSeconds = 30;
+const int menuResetSeconds = 5*60;
 int menuClearTimer = 0;
 
 void handleInput() {
