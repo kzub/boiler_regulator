@@ -31,9 +31,12 @@
 // --- CONSTANTS ---
 const unsigned long DEBOUNCE_DELAY = 300;
 const int ENCODER_TURN_STEP = 500; // how many motor steps per one click
-const int BACKOFF_STEPS = 100;
+const int BACKOFF_STEPS = 500;
 const long MAX_POSITION_LIMIT = 10000;
 const long SAFETY_RUN_LIMIT = 20000;
+// Direction multiplier: -1 for motors with setPinsInverted, 1 for normal
+const int M1_DIR = -1;
+const int M2_DIR =  1;
 const static char TRAILING_CHARS[] = "      ";
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
@@ -61,6 +64,8 @@ int lastEncoderA = LOW;
 
 bool motorsEnabled = false;
 bool isBackingOff = false;
+bool minLocked = false; // endstop was hit, ignore until released
+bool maxLocked = false;
 
 unsigned long lastTempUpdate = 0;
 const long TEMP_UPDATE_INTERVAL = 5000;
@@ -76,6 +81,7 @@ void handleInput();
 void updateLCD();
 void manageMotors();
 void triggerBackoff(AccelStepper &motor, int direction, int pin);
+void checkEndstops(AccelStepper &motor, int dir, bool minHit, bool maxHit);
 void enableMotors(bool enable);
 void loadIP(void);
 void parseAndSaveIP(char* buffer);
@@ -194,29 +200,35 @@ void manageMotors() {
     bool minHit = (digitalRead(PIN_COMMON_MIN) == LOW);
     bool maxHit = (digitalRead(PIN_COMMON_MAX) == LOW);
 
-    // Motor 1 Logic
+    // Clear lock once endstop is physically released
+    if (!minHit) minLocked = false;
+    if (!maxHit) maxLocked = false;
+
     if (motor1.distanceToGo() != 0) {
         motor1.run();
-        if (minHit && motor1.speed() < 0 && !isBackingOff) {
-            triggerBackoff(motor1, 1, PIN_COMMON_MIN);
-            motor1.setCurrentPosition(BACKOFF_STEPS);
-        }
-        else if (maxHit && motor1.speed() > 0 && !isBackingOff) {
-            triggerBackoff(motor1, -1, PIN_COMMON_MAX);
-            motor1.setCurrentPosition(MAX_POSITION_LIMIT - BACKOFF_STEPS);
-        }
+        checkEndstops(motor1, M1_DIR, minHit, maxHit);
     }
-    // Motor 2 Logic
     else if (motor2.distanceToGo() != 0) {
         motor2.run();
-        if (minHit && motor2.speed() < 0 && !isBackingOff) {
-            triggerBackoff(motor2, 1, PIN_COMMON_MIN);
-            motor2.setCurrentPosition(BACKOFF_STEPS);
-        }
-        else if (maxHit && motor2.speed() > 0 && !isBackingOff) {
-            triggerBackoff(motor2, -1, PIN_COMMON_MAX);
-            motor2.setCurrentPosition(MAX_POSITION_LIMIT - BACKOFF_STEPS);
-        }
+        checkEndstops(motor2, M2_DIR, minHit, maxHit);
+    }
+}
+
+// Generic endstop handler. dir = 1 for normal motor, -1 for inverted.
+// Uses distanceToGo() instead of speed() — speed can be 0 during accel ramp.
+void checkEndstops(AccelStepper &motor, int dir, bool minHit, bool maxHit) {
+    long dtg = motor.distanceToGo() * dir;
+    if (minHit && !minLocked && dtg < 0 && !isBackingOff) {
+        triggerBackoff(motor, dir, PIN_COMMON_MIN);
+        motor.setCurrentPosition(BACKOFF_STEPS);
+        motor.moveTo(BACKOFF_STEPS);
+        minLocked = true;
+    }
+    else if (maxHit && !maxLocked && dtg > 0 && !isBackingOff) {
+        triggerBackoff(motor, -dir, PIN_COMMON_MAX);
+        motor.setCurrentPosition(MAX_POSITION_LIMIT - BACKOFF_STEPS);
+        motor.moveTo(MAX_POSITION_LIMIT - BACKOFF_STEPS);
+        maxLocked = true;
     }
 }
 
@@ -249,10 +261,12 @@ void handleInput() {
         int direction = (currentB != currentA) ? 1 : -1;
 
         if (currentScreen == SCREEN_CONTROL_M1) {
-            motor1.move(direction * ENCODER_TURN_STEP);
+            if (!(direction * M1_DIR < 0 && minLocked) && !(direction * M1_DIR > 0 && maxLocked))
+                motor1.move(direction * ENCODER_TURN_STEP);
         }
         else if (currentScreen == SCREEN_CONTROL_M2) {
-            motor2.move(direction * ENCODER_TURN_STEP);
+            if (!(direction * M2_DIR < 0 && minLocked) && !(direction * M2_DIR > 0 && maxLocked))
+                motor2.move(direction * ENCODER_TURN_STEP);
         }
         menuClearTimer = 0;
     }
