@@ -1,66 +1,103 @@
-# AI Agent Context & Developer Guide: Boiler Valve Regulator
+# Boiler Regulator: Repository Guide
 
-This document serves as the comprehensive context and reference guide for any AI agent working on this project in the future. Read this file first to understand the hardware, software architecture, core logic, and critical constraints before making any modifications to the codebase.
+Read this file first for repository-wide context, then read the nearest nested
+`AGENTS.md` before changing a component:
 
-## 1. Project Overview
-This project is a custom firmware for a **Remote Heater Valve Controller** (specifically designed for ESBE VRG131 valves). It uses an Arduino to control two stepper motors via a CNC shield. The device features an I2C LCD, a rotary encoder with a push button for local UI, 1-Wire temperature sensors, and an Ethernet interface for remote monitoring and control.
+- `controller/AGENTS.md` — hardware, firmware, pinout, endstops, memory limits,
+  and the deferred Motor 1 firmware TODO.
+- `webapp/AGENTS.md` — React/Fastify architecture, HTTP API, calibration model,
+  persistence, diagnostics, deployment, and tests.
 
-## 2. Hardware Specifications
-* **Microcontroller:** Arduino Leonardo ETH R3 (ATmega32U4)
-* **Shield:** CNC Shield V3 (customized - jumpers removed for A-axis isolation)
-* **Motors:** 2x NEMA 17 Stepper Motors (A4988 / DRV8825 drivers)
-* **UI:** 16x2 I2C LCD (PCF8574T), Rotary Encoder (KY-040), 1x Push Button
-* **Sensors:** 3x DS18B20 OneWire temperature sensors
-* **Endstops:** 2x Physical limit switches (**SHARED** by both motors for MIN and MAX bounds)
+## Project purpose
 
-### Pinout Configuration
-* **A0:** One-Wire Temp Sensors
-* **A1:** Menu Button (Debounced in software)
-* **A2 / A3:** Rotary Encoder A / B
-* **11:** Shared MIN Endstop (Both motors trigger this at position 0)
-* **9:** Shared MAX Endstop (Both motors trigger this at max position)
-* **4 / 7:** Motor 1 (First Floor) - Step / Dir
-* **12 / 13:** Motor 2 (Second Floor) - Step / Dir
-* **8:** Global Motor Enable (Active LOW)
+This repository controls two ESBE VRG131 heating valves and exposes their state
+through a mobile-first LAN dashboard. An Arduino Leonardo ETH drives both
+stepper motors and reads temperature sensors. A Node.js web application is the
+only browser-facing component and translates percentages into the controller's
+small HTTP protocol.
 
-## 3. Software Architecture
-* **Environment:** PlatformIO (`leonardoeth` board, `arduino` framework)
-* **Key Libraries:** `AccelStepper`, `DallasTemperature`, `OneWire`, `LiquidCrystal_I2C`, `Ethernet`, `EEPROM`
-* **Local UI State Machine:**
-  * `SCREEN_DASHBOARD`: Displays temperatures (F1, F2, Boiler, Room).
-  * `SCREEN_CONTROL_M1`: Manual control of Motor 1 using the encoder.
-  * `SCREEN_CONTROL_M2`: Manual control of Motor 2 using the encoder.
-* **Network API (HTTP Port 80):**
-  * `GET /status`: Returns JSON with temperatures and motor positions.
-  * `GET /set?motor=[1|2]&pos=[+X|-X|min|max]`: Move a specific motor relatively or to a bound.
-  * `GET /setip?ip=XXX.XXX.XXX.XXX`: Sets static IP, saves to EEPROM, and requires reboot.
+## Repository layout
 
-## 4. Core Logic & Special Behaviors
-* **Shared Endstops (Collision Prevention):** Because both motors share the same physical MIN and MAX endstops, a motor triggering an endstop will block the other motor if not cleared. 
-  * **Logic:** When an endstop is hit, the firmware forces the motor to slowly back off (`motor.runSpeed()`) until the switch is physically released (`digitalRead() == HIGH`), followed by an extra `BACKOFF_STEPS` clearance move.
-* **Motor Inversion:** Motor 1's physical mounting is mirrored compared to Motor 2. Motor 1 direction pins are inverted in software (`motor1.setPinsInverted(true, false, false);`).
-* **Power Management:** To prevent overheating, stepper drivers are dynamically enabled/disabled. The enable pin (8) goes LOW (active) only when `distanceToGo() != 0`.
-* **Encoder Tuning:** One encoder click corresponds to `500` motor steps for fast manual tuning.
+- `controller/` — PlatformIO Arduino firmware for the physical controller.
+- `webapp/` — React client plus Fastify backend. The backend connects directly
+  to the controller, normally at `http://192.168.88.20`.
+- `deploy/` — host-specific deployment assets (`deploy/bob/` for the Synology
+  NAS; `deploy/bob/deploy.sh` syncs, rebuilds, restarts and verifies it).
+- `docs/` — design choices and implementation plans.
+- `3D_models/` — printable enclosure/mechanical assets.
 
-## 5. CRITICAL CONSTRAINTS: Memory (Flash & RAM)
-**DO NOT IGNORE THIS SECTION.**
-The ATmega32U4 has severe memory limitations (28KB Flash, 2.5KB RAM). As of the latest build, **Flash is at 99.4% capacity (~170 bytes free)**.
+## System architecture
 
-When modifying the code, you **MUST** adhere to the following rules:
-1. **No `String` class:** Never use Arduino `String` objects. Use standard C strings (`char array`), pointer arithmetic, and manual parsing (e.g., as seen in `parseAndSaveIP`).
-2. **Use `F()` Macro:** All static strings in `print()` statements must be wrapped in `F("...")` to keep them out of RAM.
-3. **No Heavy Libraries:** Do not import JSON parsing libraries (like `ArduinoJson`). Construct JSON responses manually via `client.print()`.
-4. **Code Reuse:** If you add logic, see if you can refactor existing logic to save space.
-5. **Compile Check:** Always run `pio run` to verify the size after making changes. If the build fails due to size, you must aggressively optimize your additions.
+```text
+Browser
+  │ HTTP :8080
+  ▼
+React UI + Fastify backend
+  │ controller HTTP :80
+  ▼
+Arduino Leonardo ETH → CNC shield → two stepper motors/shared endstops
+```
 
-## 6. Recent Modifications (March 2026)
-* Fixed shared endstop collision by changing `triggerBackoff` to wait for the specific pin to physically release before marking the backoff as complete.
-* Added `motor1.setPinsInverted(true, false, false)` to align Floor 1 valve rotation with logical increment/decrement.
-* Increased `ENCODER_TURN_STEP` to `500` to speed up the manual UI tuning.
-* Increased the auto-revert to dashboard timer (`menuResetSeconds`) to 5 minutes.
+The browser never connects to the Arduino directly. The backend owns command
+serialization, calibration, persisted position knowledge, retries, and
+diagnostic logs. The controller owns real-time stepping, physical endstop
+handling, local LCD/encoder input, temperature acquisition, and motor power.
 
-## 7. How to build
+## Cross-component invariants
+
+1. Both motors share MIN and MAX endstop inputs. Never run the motors in
+   parallel; all backend motion must remain behind one global command lock.
+2. A controller command response acknowledges receipt, not completed movement.
+   Completion must be inferred from stable `/status` samples.
+3. Do not retry movement commands automatically. Duplicate relative movement is
+   unsafe. Read-only status calls may be retried during transient timeouts.
+4. Treat motor movement and firmware upload as physical operations. Unit tests,
+   builds, and read-only checks do not authorize movement or flashing.
+5. Preserve calibration data across webapp restarts. An interrupted calibration
+   must remain invalid rather than silently trusting an old scale.
+6. The counter values the firmware writes at the end-stops are constants, not
+   measured positions. Never derive a percentage scale from the distance
+   between them. Read both component guides before changing direction,
+   endpoint, or percentage logic.
+7. Keep the controller protocol small and backward compatible. Coordinate any
+   protocol change across `controller/` and `webapp/`.
+
+## Current deployed compatibility state
+
+At every end-stop the firmware backs off and overwrites the counter with a
+constant: `BACKOFF_STEPS` at one end and `MAX_POSITION_LIMIT - BACKOFF_STEPS`
+at the other (`500` and `9500` on the deployed build). Those `9000` steps are a
+firmware convention; the valves really travel about `6000` steps. The webapp
+therefore measures travel during calibration and converts percentages with the
+measured step count.
+
+Motor 1 is physically mirrored and uses an inverted direction pin. Its deployed
+firmware still has the non-inverted endstop-direction mapping, so it writes the
+two constants the other way round (`min` near `9500`, `max` near `500`) while
+its counter still grows towards MAX; intermediate values can be outside both
+constants. The backend needs no dedicated switch for this: it anchors on
+whichever constant the firmware last wrote and counts steps from there. After
+the firmware TODO in `controller/AGENTS.md` is flashed, recalibrate and
+physically verify both regulators.
+
+## Verification entry points
+
+Firmware:
+
 ```bash
 cd controller
 pio run
 ```
+
+Web application:
+
+```bash
+cd webapp
+npm test
+npm run typecheck
+npm run lint
+npm run build
+```
+
+Run the smallest relevant checks while iterating, then all component checks
+before handoff. Never use a real movement command as an automated test.

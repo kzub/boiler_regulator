@@ -47,6 +47,8 @@ This project uses the following libraries:
 
 * Ensure the driver Vref is calibrated to match motor current limits.
 * If using Pin 12, ensure no SPI conflict if adding displays/SD cards later.
+* **Counter constants are not travel:** `triggerBackoff()` normalises the counter to `BACKOFF_STEPS` at one end-stop and `MAX_POSITION_LIMIT - BACKOFF_STEPS` at the other, so the `9000` steps between those constants are a firmware convention and not the real valve travel (roughly `6000` steps). The webapp measures the travel during calibration instead of trusting that range; percentages built from the constants alone open a valve by about one and a half times the requested amount.
+* **TODO — Motor 1 reversed endstops:** `motor1.setPinsInverted(true, false, false)` reverses the physical direction, but `manageMotors()` still associates negative motion with `PIN_COMMON_MIN` and positive motion with `PIN_COMMON_MAX`. On the installed controller Motor 1 therefore normalises `min` near `9500` and `max` near `500`, and intermediate travel leaves that range. The webapp handles this by anchoring on whichever constant it last saw, so it needs no separate switch; after fixing the firmware, just recalibrate.
 
 ---
 
