@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Limit } from '../shared/contracts';
 import { api, ApiRequestError } from './api';
 import { AppVersion } from './components/AppVersion';
@@ -9,6 +9,10 @@ import { RegulatorControl } from './components/RegulatorControl';
 import { TemperatureMetric } from './components/TemperatureMetric';
 import { useStatus } from './hooks/use-status';
 import { useControllerLog } from './hooks/use-controller-log';
+
+const NOTICE_TIMEOUT_MS = 5000;
+
+type Notice = { id: number; text: string };
 
 type Pending = { kind: 'target'; id: 1 | 2; percent: number } | { kind: 'limit'; id: 1 | 2; limit: Limit } | { kind: 'calibration' };
 
@@ -30,10 +34,17 @@ export default function App() {
   const controllerLog = useControllerLog();
   const [pending, setPending] = useState<Pending | null>(null);
   const [sending, setSending] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const showNotice = (text: string) => setNotice({ id: Date.now() + Math.random(), text });
   const calibration = data?.calibration;
   const motionInProgress = data?.regulators.floor1.state === 'moving' || data?.regulators.floor2.state === 'moving';
   const globalDisabled = offline || !data || calibration?.state === 'running' || motionInProgress;
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), NOTICE_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   const execute = async () => {
     if (!pending || sending) return;
@@ -42,9 +53,9 @@ export default function App() {
       if (pending.kind === 'target') await api.target(pending.id, pending.percent);
       else if (pending.kind === 'limit') await api.limit(pending.id, pending.limit);
       else await api.startCalibration();
-      setNotice(pending.kind === 'calibration' ? 'Калибровка запущена. Оба регулятора будут двигаться автоматически.' : 'Команда принята. Дождитесь обновления позиции.');
+      showNotice(pending.kind === 'calibration' ? 'Калибровка запущена. Оба регулятора будут двигаться автоматически.' : 'Команда принята. Дождитесь обновления позиции.');
       setPending(null); await refresh();
-    } catch (error) { setNotice(initialNotice(error instanceof ApiRequestError ? error.code : 'UNKNOWN')); setPending(null); }
+    } catch (error) { showNotice(initialNotice(error instanceof ApiRequestError ? error.code : 'UNKNOWN')); setPending(null); }
     finally { setSending(false); }
   };
 
@@ -58,7 +69,7 @@ export default function App() {
 
   return <main className="app-shell">
     <header><div><p className="eyebrow">BOILER REGULATOR</p><h1>Котельная</h1></div><ConnectionStatus offline={offline} receivedAt={data?.receivedAt} error={lastError} /></header>
-    {notice && <div className="notice" aria-live="polite">{notice}<button aria-label="Закрыть уведомление" onClick={() => setNotice(null)}>×</button></div>}
+    {notice && <div className="notice" aria-live="polite">{notice.text}<button aria-label="Закрыть уведомление" onClick={() => setNotice(null)}>×</button></div>}
     {loading && !data ? <section className="loading" aria-live="polite">Получаем состояние контроллера…</section> : <>
       <section className="temperatures" aria-labelledby="temperatures-heading"><div className="section-title"><h2 id="temperatures-heading">Температуры</h2><span>сейчас</span></div><div className="temperature-grid">
         <TemperatureMetric label="Первый этаж" value={data?.temperatures.floor1 ?? null} />
